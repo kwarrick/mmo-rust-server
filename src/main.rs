@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use websocket::message::OwnedMessage;
 use websocket::server::InvalidConnection;
 use websocket::server::r#async::Server;
+use websocket::result::WebSocketError;
 
 use futures::{Future,Stream,Sink};
 use futures::future::{self, Loop};
@@ -52,6 +53,17 @@ fn main() {
             // This future completes the connection and then proceses the sink and stream
             let accept = upgrade.accept().and_then(move |(framed,_)| {
                 let (sink, stream) = framed.split();
+
+                // Put a shareable (multiple-producer) channel ontop of the sink
+                let (tx, rx) = futures::sync::mpsc::channel(100);
+                let f = rx
+                    .map_err(|_| WebSocketError::ResponseError("rx dropped"))
+                    .forward(sink)
+                    .map(|_| ())
+                    .map_err(|_| ());
+                let sink = tx;
+
+                executor_2inner.spawn(f);
 
                 { // Increment the counter by first locking the RwLock
                     let mut c = counter_inner.write().unwrap();
