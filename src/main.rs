@@ -104,40 +104,24 @@ fn main() {
     let send_handler = tokio::timer::Interval::new(Instant::now(), Duration::from_millis(100))
         .map_err(|_| ())
         .for_each(move |_| {
-            // This time we clone because "and_then" (line 94) takes a FnMut closure which
             let connections_inner = connections.clone();
             let executor          = executor.clone();
             let entities_inner    = entities.clone();
 
-            let mut conn = connections_inner.write().unwrap();
-            let ids = conn.iter().map(|(k,v)| { k.clone() }).collect::<Vec<_>>();
-
             let entities = entities_inner.read().unwrap();
             if let Some((_, first)) = entities.iter().take(1).next() {
-
                 // Meticulously serialize entity vector into json
                 let serial_entities = format!("[{}]", entities.iter().skip(1)
                                               .map(|(_,e)| e.to_json())
                                               .fold(first.to_json(), |acc,s| format!("{},{}",s,acc)));
-                for id in ids.iter() {
-                    // Must take ownership of the sink to send on it
-                    // The only way to take ownership of a hashmap value is to remove it
-                    // And later put it back (line 124)
-                    let sink = conn.remove(id).unwrap();
 
-                    // Clone for future "f"
-                    let connections = connections_inner.clone();
-                    let id = id.clone();
-
+                let connections = connections_inner.read().unwrap();
+                for sink in connections.values().cloned() {
                     // This is where the game state is actually sent to the client
                     let f = sink
                         .send(OwnedMessage::Text(serial_entities.clone()))
-                        .and_then(move |sink| {
-                            // Re-insert the entry to the connections map
-                            connections.write().unwrap().insert( id.clone(), sink );
-                            Ok(())
-                        })
-                    .map_err(|_| ());
+                        .map(|_| ())
+                        .map_err(|_| ());
 
                     executor.spawn(f);
                 };
