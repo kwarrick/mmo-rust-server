@@ -65,10 +65,18 @@ fn main() {
                 let c = *counter_inner.read().unwrap();
 
                 // Spawn a stream to process future messages from this client
-                let f = stream.for_each(move |msg| {
-                    process_message(c, &msg, entities.clone());
-                    Ok(())
-                }).map_err(|_| ());
+                let entities_inner = entities.clone();
+                let f = stream
+                    .map_err(|_| ())
+                    .for_each(move |msg| {
+                        process_message(c, &msg, entities.clone());
+                        Ok(())
+                    })
+                    .then(move |_| {
+                        connections_inner.write().unwrap().remove(&id);
+                        entities_inner.write().unwrap().remove(&id);
+                        Ok(())
+                    });
 
                 executor_2inner.spawn(f);
 
